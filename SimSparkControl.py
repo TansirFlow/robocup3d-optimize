@@ -15,11 +15,14 @@ agent_position_list = [
     [0, 0, 0], [0, 0, 0], [0, 0, 0], [0, 0, 0], [0, 0, 0]
 ]
 ball_pos = [0, 0, 0]
+ball_speed = 0
+last_speed_update_time = 0
 game_time = 0
 server_running = False
 
 
 def run_rcssserver3d():
+    kill_rcssserver3d()
     command = "nohup rcssserver3d > /dev/null 2>&1 &"
     subprocess.Popen(command, shell=True)
     global server_running
@@ -156,7 +159,9 @@ def move_ball(x, y):
     msg = prepare_msg(msg)
     sock.sendall(msg)
     response = sock.recv(1024)
-    print(response[4:])
+    # print(response[4:])
+    global ball_speed
+    ball_speed = 0
 
     sock.close()
     return True
@@ -172,7 +177,7 @@ def run_linux_command(command, server=host, username=host_username, password=hos
 
 
 def refresh_server_info():
-    global server_running
+    global server_running, last_speed_update_time, ball_speed
     global ball_pos, game_time, agent_position_list
 
     sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
@@ -197,7 +202,13 @@ def refresh_server_info():
                 z = round(float(numbers[2]), 2)
                 if math.sqrt((x - ball_pos[0]) ** 2 + (y - ball_pos[1]) ** 2 + (z - ball_pos[2]) ** 2) > 0.01:
                     # print(f"x={x},y={y},z={z}")
+                    delta_time = game_time-last_speed_update_time
+                    delta_distance = math.sqrt((x - ball_pos[0]) ** 2 + (y - ball_pos[1]) ** 2 + (z - ball_pos[2]) ** 2)
+                    if delta_time > 0.001:
+                        ball_speed = delta_distance/delta_time
                     ball_pos = [x, y, z]
+                    last_speed_update_time = game_time
+
 
             pattern = r"\(time ([^\)]+)\)"
             match = re.search(pattern, receive_msg)
@@ -232,6 +243,11 @@ def refresh_server_info():
     sock.close()
 
 
+def get_ball_speed():
+    global ball_speed
+    return ball_speed
+
+
 def get_ball_pos():
     global ball_pos
     return ball_pos
@@ -249,10 +265,15 @@ def get_game_time():
     return game_time
 
 
+def is_server_running():
+    return server_running
+
+
 def start_get_server_info():
     def insistence_refresh_server_info():
         while True:
             refresh_server_info()
+
     t = threading.Thread(target=insistence_refresh_server_info)
     t.start()
 

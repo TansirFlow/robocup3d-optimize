@@ -1,3 +1,4 @@
+import math
 import os
 import subprocess
 import time
@@ -7,16 +8,6 @@ import socket
 import configparser
 
 import SimSparkControl
-
-factory = "Nao"  # 机器人类型
-runtimes = 30  # 每个参数跑几次
-playerid = 8  # 上几号球员
-decisionmaker = "Training"  # decisionmaker类名
-jarName = "magmaagent.jar"  # 导出的jar包名
-popsize = 50  # 种群规模
-cloud_server_ip = ""  # 远程服务器IP
-cloud_server_port = 5678  # 远程服务器端口
-perfect_params_score_threshold = 90  # 得分大于多少的参数认为是优秀参数
 
 cma_param = {}
 run_param = {}
@@ -37,7 +28,15 @@ def get_config(config_file_name):
     run_param["jarFileName"] = config.get("run_param", "jarFileName")
     run_param["acceptScore"] = config.getfloat("run_param", "acceptScore")
     run_param["runtimesPerParameter"] = config.getint("run_param", "runtimesPerParameter")
-    run_param["tempParameterFileName"] = config.getint("run_param", "tempParameterFileName")
+    ball_start_pos_temp = config.get("run_param", "ballStartPos").split(',')
+    run_param["ballStartPos"] = [float(ball_start_pos_temp[0]), float(ball_start_pos_temp[1])]
+    agent_start_pos_temp = config.get("run_param", "agentStartPos").split(',')
+    run_param["agentStartPos"] = [float(agent_start_pos_temp[0]), float(agent_start_pos_temp[1])]
+    run_param["successKickDistance"] = config.getfloat("run_param", "successKickDistance")
+    run_param["minKickFailedTime"] = config.getfloat("run_param", "minKickFailedTime")
+    kick_target_pos_temp = config.get("run_param", "kickTargetPos").split(',')
+    run_param["kickTargetPos"] = [float(kick_target_pos_temp[0]), float(kick_target_pos_temp[1])]
+    run_param["kickTargetDistance"] = config.getfloat("run_param", "kickTargetDistance")
 
     optimize_server_param["host"] = config.get("optimize_server_param", "host")
     optimize_server_param["port"] = config.getint("optimize_server_param", "port")
@@ -48,61 +47,107 @@ def get_config(config_file_name):
     backup_server_param["port"] = config.getint("backup_server_param", "port")
 
 
-def save_to_localhost(params, score):  # 优秀参数存到本地
+def save_to_localhost(params, score, avg_dis, avg_t, avg_dev):  # 优秀参数存到本地
+    factory = run_param["factory"]
     file_name = factory + "_perfect_params.txt"
     file_object = open(file_name, "a")
     text = "################################################################\n"
     for i in params:
         text = text + str(i) + "\n"
-    text = text + "score:" + str(score) + "\n################################################################\n\n\n"
+    text = (text + "score:" + str(score) + "avg_dis:" + str(avg_dis) + "avg_t:" + str(avg_t) + "avg_dev:" + str(avg_dev)
+            + "\n################################################################\n\n\n")
     file_object.write(text)
     file_object.close()
 
 
-def send_to_cloud_server(params, score):  # 优秀参数发送云端
-    global cloud_server_ip, cloud_server_port, factory
-    try:
-        print("test")
-        s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-        addr = (cloud_server_ip, cloud_server_port)
-        s.connect(addr)
-        text = "DREAMWING3D&&&&&&" + factory + "&&&&&&"
-        for i in params:
-            text = text + str(i) + "\n"
-        text = text + "score:" + str(score)
-        s.send(text.encode('utf-8'))
-        s.close()
-        print("send successful")
-    finally:
-        print("test2")
-        return
-
-
-def save_perfect_params(params, score):
-    save_to_localhost(params, score)
-    send_to_cloud_server(params, score)
+def save_perfect_params(params, score, avg_dis, avg_t, avg_dev):
+    save_to_localhost(params, score, avg_dis, avg_t, avg_dev)
+    # send_to_cloud_server(params, score, avg_dis, avg_t, avg_dev)
 
 
 def train_kick():
-    SimSparkControl.run_rcssserver3d()
-    time.sleep(1)
-    start_agent_command = "java -jar " + jarName + " --playerid=" + str(
-        playerid) + " --factory=" + factory + " --teamname=WeWantKick15m --decisionmaker=" + decisionmaker
-    subprocess.Popen(start_agent_command, shell=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+    def run_agent():
+        factory = run_param["factory"]
+        player_id = run_param["playerId"]
+        decision_maker = run_param["decisionMaker"]
+        jar_file_name = run_param["jarFileName"]
+        run_agent_command = "java -jar " + jar_file_name + " --playerid=" + str(
+            player_id) + " --factory=" + factory + " --teamname=WeWantKick15m --decisionmaker=" + decision_maker
+        subprocess.Popen(run_agent_command, shell=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+
+    def before_kick():
+        ball_start_pos = run_param["ballStartPos"]
+        agent_start_pos = run_param["agentStartPos"]
+
+        SimSparkControl.play_on()
+        time.sleep(0.2)
+        SimSparkControl.move_ball(ball_start_pos[0], ball_start_pos[1])
+        SimSparkControl.move_player(agent_start_pos[0], agent_start_pos[1])
+        SimSparkControl.set_time(0)
+
+    def get_kick_distance():
+        ball_start_pos = run_param["ballStartPos"]
+        ball_pos = SimSparkControl.get_ball_pos()
+        dis = math.sqrt((ball_start_pos[0] - ball_pos[0]) ** 2 + (ball_start_pos[1] - ball_pos[1]) ** 2)
+        return dis
+
+    def end_kick():
+        SimSparkControl.before_kick_off()
+
+    if not SimSparkControl.is_server_running():
+        SimSparkControl.run_rcssserver3d()
+        time.sleep(1)
+
+    run_agent()
+    before_kick()
+
+    success_kick_distance = run_param["successKickDistance"]
+    min_kick_failed_time = run_param["minKickFailedTime"]
     start_time = time.time()
     while 1:
         time.sleep(0.1)
-        if time.time() - start_time > 6:
-            os.system("pkill rcsss -9")
-            return -1
-        if os.path.exists("score.txt"):
-            time.sleep(0.2)
-            os.system("pkill rcsss -9")
-            file_object = open("score.txt", "r")
-            text = file_object.readlines()
-            file_object.close()
-            os.remove("score.txt")
-            return calculate_score(text)
+        kick_distance = get_kick_distance()
+        game_time_consume = SimSparkControl.get_game_time()
+        ball_speed = SimSparkControl.get_ball_speed()
+        ball_pos = SimSparkControl.get_ball_pos()
+        if not SimSparkControl.is_server_running():  # server意外退出的应对方案
+            SimSparkControl.kill_rcssserver3d()
+            SimSparkControl.run_rcssserver3d()
+            run_agent()
+            before_kick()
+            start_time = time.time()
+
+        if time.time() - start_time > 6:  # 程序卡死
+            SimSparkControl.kill_rcssserver3d()
+            SimSparkControl.run_rcssserver3d()
+            run_agent()
+            before_kick()
+            start_time = time.time()
+
+        if game_time_consume > min_kick_failed_time:  # 参数太差，踢不了球
+            end_kick()  # 结束此次踢球，但不终止server
+            return {"status": False}
+
+        if ball_speed < 0.001 and kick_distance > success_kick_distance:  # 踢球成功
+            end_kick()  # 结束此次踢球，但不终止server
+            ball_start_pos = run_param["ballStartPos"]
+            kick_target_pos = run_param["kickTargetPos"]
+            distance = kick_distance
+            time_consume = game_time_consume
+
+            vector1 = [ball_pos[0] - ball_start_pos[0], ball_pos[1] - ball_start_pos[1], 0]
+            vector2 = [kick_target_pos[0] - ball_start_pos[0], kick_target_pos[1] - ball_start_pos[1], 0]
+            # 计算点积
+            dot_product = sum(x * y for x, y in zip(vector1, vector2))
+            # 计算向量模
+            magnitude1 = math.sqrt(sum(x ** 2 for x in vector1))
+            magnitude2 = math.sqrt(sum(x ** 2 for x in vector2))
+            # 计算余弦相似度和夹角
+            cosine_similarity = dot_product / (magnitude1 * magnitude2)
+            angle = math.degrees(math.acos(cosine_similarity))
+            deviation = angle
+
+            return {"status": True, "distance": distance, "time": time_consume, "deviation": deviation}
 
 
 def write_temp_parameter_file(params):
@@ -119,8 +164,16 @@ def write_temp_parameter_file(params):
 
 
 def estimate_score(distance_list, time_list, deviation_list):
-    score = 80
-    return score
+    score_list = []
+    kick_target_distance = run_param["kickTargetDistance"]
+    for i in range(len(distance_list)):
+        dis_score = 100 * distance_list[i] / kick_target_distance
+        time_score = 100 - time_list[i]
+        deviation_score = 100 - deviation_list[i]
+        single_score = dis_score * 0.6 + time_score * 0.2 + deviation_score * 0.2
+        score_list.append(single_score)
+    avg_score = sum(score_list) / len(score_list)
+    return avg_score
 
 
 def fitness(params):
@@ -133,15 +186,21 @@ def fitness(params):
     time_list = []
     deviation_list = []
     for i in range(runtimes_per_parameter):
-        success, dis, t, dev = train_kick()
+        result = train_kick()
+        success = result["status"]
         if success:
+            dis = result["distance"]
+            t = result["time"]
+            dev = result["deviation"]
             distance_list.append(dis)
             time_list.append(t)
             deviation_list.append(dev)
     score = estimate_score(distance_list, time_list, deviation_list)
     if score >= accept_score:
-        save_perfect_params(params, score)
+        save_perfect_params(params, score, sum(distance_list) / len(distance_list), sum(time_list) / len(time_list),
+                            sum(deviation_list) / len(deviation_list))
     print("score", score)
+    SimSparkControl.kill_rcssserver3d()
     return -score
 
 
