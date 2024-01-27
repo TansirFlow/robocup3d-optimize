@@ -1,6 +1,7 @@
 import math
 import os
 import subprocess
+import threading
 import time
 import cma
 import numpy as np
@@ -27,6 +28,7 @@ def get_config(config_file_name):
     run_param["jarFileName"] = config.get("run_param", "jarFileName")
     run_param["acceptScore"] = config.getfloat("run_param", "acceptScore")
     run_param["runtimesPerParameter"] = config.getint("run_param", "runtimesPerParameter")
+    run_param["tempParameterFileName"] = config.get("run_param", "tempParameterFileName")
     ball_start_pos_temp = config.get("run_param", "ballStartPos").split(',')
     run_param["ballStartPos"] = [float(ball_start_pos_temp[0]), float(ball_start_pos_temp[1])]
     agent_start_pos_temp = config.get("run_param", "agentStartPos").split(',')
@@ -36,13 +38,14 @@ def get_config(config_file_name):
     kick_target_pos_temp = config.get("run_param", "kickTargetPos").split(',')
     run_param["kickTargetPos"] = [float(kick_target_pos_temp[0]), float(kick_target_pos_temp[1])]
     run_param["kickTargetDistance"] = config.getfloat("run_param", "kickTargetDistance")
+    run_param["minRunStuckTime"] = config.getfloat("run_param", "minRunStuckTime")
 
     optimize_server_param["host"] = config.get("optimize_server_param", "host")
     optimize_server_param["port"] = config.getint("optimize_server_param", "port")
     optimize_server_param["username"] = config.get("optimize_server_param", "username")
     optimize_server_param["password"] = config.get("optimize_server_param", "password")
 
-    backup_server_param["host"] = config.get("backup_server_param", "password")
+    backup_server_param["host"] = config.get("backup_server_param", "host")
     backup_server_param["port"] = config.getint("backup_server_param", "port")
 
 
@@ -64,24 +67,25 @@ def save_perfect_params(params, score, avg_dis, avg_t, avg_dev):
     # send_to_cloud_server(params, score, avg_dis, avg_t, avg_dev)
 
 
-def train_kick():
-    def run_agent():
-        factory = run_param["factory"]
-        player_id = run_param["playerId"]
-        decision_maker = run_param["decisionMaker"]
-        jar_file_name = run_param["jarFileName"]
-        run_agent_command = "java -jar " + jar_file_name + " --playerid=" + str(
-            player_id) + " --factory=" + factory + " --teamname=WeWantKick15m --decisionmaker=" + decision_maker
-        subprocess.Popen(run_agent_command, shell=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+def run_agent():
+    factory = run_param["factory"]
+    player_id = run_param["playerId"]
+    decision_maker = run_param["decisionMaker"]
+    jar_file_name = run_param["jarFileName"]
+    run_agent_command = "java -jar " + jar_file_name + " --playerid=" + str(
+        player_id) + " --factory=" + factory + " --teamname=WeWantKick15m --decisionmaker=" + decision_maker
+    subprocess.Popen(run_agent_command, shell=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+    time.sleep(1)
 
-    def before_kick():
+
+def train_kick():
+    def start_kick():
         ball_start_pos = run_param["ballStartPos"]
         agent_start_pos = run_param["agentStartPos"]
-
+        player_id = run_param["playerId"]
         SimSparkControl.play_on()
-        time.sleep(0.2)
         SimSparkControl.move_ball(ball_start_pos[0], ball_start_pos[1])
-        SimSparkControl.move_player(agent_start_pos[0], agent_start_pos[1])
+        SimSparkControl.move_player(player_id, agent_start_pos[0], agent_start_pos[1])
         SimSparkControl.set_time(0)
 
     def get_kick_distance():
@@ -92,16 +96,17 @@ def train_kick():
 
     def end_kick():
         SimSparkControl.before_kick_off()
+        time.sleep(0.5)
 
     if not SimSparkControl.is_server_running():
         SimSparkControl.run_rcssserver3d()
         time.sleep(1)
 
-    run_agent()
-    before_kick()
+    start_kick()
 
     success_kick_distance = run_param["successKickDistance"]
     min_kick_failed_time = run_param["minKickFailedTime"]
+    min_run_stuck_time = run_param["minRunStuckTime"]
     start_time = time.time()
     while 1:
         time.sleep(0.1)
@@ -110,24 +115,29 @@ def train_kick():
         ball_speed = SimSparkControl.get_ball_speed()
         ball_pos = SimSparkControl.get_ball_pos()
         if not SimSparkControl.is_server_running():  # server意外退出的应对方案
+            print("server意外退出，正在重启...")
             SimSparkControl.kill_rcssserver3d()
             SimSparkControl.run_rcssserver3d()
             run_agent()
-            before_kick()
+            start_kick()
             start_time = time.time()
+            time.sleep(0.5)
 
-        if time.time() - start_time > 6:  # 程序卡死
+        if time.time() - start_time > min_run_stuck_time:  # 程序卡死
+            print("server卡死，正在重启...")
             SimSparkControl.kill_rcssserver3d()
             SimSparkControl.run_rcssserver3d()
             run_agent()
-            before_kick()
+            start_kick()
             start_time = time.time()
+            time.sleep(0.5)
 
         if game_time_consume > min_kick_failed_time:  # 参数太差，踢不了球
+            print("超时未踢出，本次踢球失败")
             end_kick()  # 结束此次踢球，但不终止server
             return {"status": False}
 
-        if ball_speed < 0.001 and kick_distance > success_kick_distance:  # 踢球成功
+        if ball_speed < 0.1 and kick_distance > success_kick_distance:  # 踢球成功
             end_kick()  # 结束此次踢球，但不终止server
             ball_start_pos = run_param["ballStartPos"]
             kick_target_pos = run_param["kickTargetPos"]
@@ -181,6 +191,8 @@ def fitness(params):
     write_temp_parameter_file(params)
 
     SimSparkControl.run_rcssserver3d()
+    run_agent()
+    time.sleep(0.5)
     distance_list = []
     time_list = []
     deviation_list = []
@@ -191,9 +203,14 @@ def fitness(params):
             dis = result["distance"]
             t = result["time"]
             dev = result["deviation"]
+            print(f"距离:{dis} 时间:{t} 偏差:{dev}")
             distance_list.append(dis)
             time_list.append(t)
             deviation_list.append(dev)
+        else:
+            distance_list.append(0)
+            time_list.append(100)
+            deviation_list.append(100)
     score = estimate_score(distance_list, time_list, deviation_list)
     if score >= accept_score:
         save_perfect_params(params, score, sum(distance_list) / len(distance_list), sum(time_list) / len(time_list),
@@ -215,6 +232,7 @@ def get_initial_parameters():
 
 def start_optimization():
     SimSparkControl.kill_rcssserver3d()
+    SimSparkControl.start_get_server_info()
     initial_parameters = get_initial_parameters()
     sigma0 = cma_param["sigma0"]
     best_parameter, best_score = cma.fmin2(fitness, initial_parameters, sigma0, options={"verbose": True, })
@@ -222,6 +240,53 @@ def start_optimization():
     print("最佳适应度值：", -best_score)
 
 
+def gui():
+    import tkinter as tk
+    window = tk.Tk()
+    server_host_label = tk.Label(window, text="server host")
+    server_port_label = tk.Label(window, text="server port")
+    ball_start_pos_label = tk.Label(window, text="ball start pos")
+    kick_target_pos_label = tk.Label(window, text="kick target pos")
+    ball_pos_label = tk.Label(window, text="ball pos")
+    agent_pos_label = tk.Label(window, text="agent pos")
+    ball_speed_label = tk.Label(window, text="ball speed")
+    game_time_label = tk.Label(window, text="game time")
+
+    server_host_label.grid(row=0, column=0)
+    server_port_label.grid(row=1, column=0)
+    ball_start_pos_label.grid(row=2, column=0)
+    kick_target_pos_label.grid(row=3, column=0)
+    ball_pos_label.grid(row=0, column=1)
+    agent_pos_label.grid(row=1, column=1)
+    ball_speed_label.grid(row=2, column=1)
+    game_time_label.grid(row=3, column=1)
+
+    def update_gui():
+        while True:
+            server_host_label.config(text="server host:"+optimize_server_param["host"])
+            server_port_label.config(text="server port:"+str(optimize_server_param["port"]))
+            ball_start_pos_label.config(text=f"kick start pos:({run_param['ballStartPos'][0]},{run_param['ballStartPos'][1]})")
+            kick_target_pos_label.config(text=f"kick target pos:({run_param['kickTargetPos'][0]},{run_param['kickTargetPos'][1]})")
+            ball_pos = SimSparkControl.get_ball_pos()
+            ball_pos_label.config(text=f"ball pos:({round(ball_pos[0],2)},{round(ball_pos[1],2)})")
+            player_id = run_param["playerId"]
+            agent_pos = SimSparkControl.get_agent_pos(player_id)
+            agent_pos_label.config(text=f"agent pos:({round(agent_pos[0],2)},{round(agent_pos[1],2)})")
+            ball_speed_label.config(text=f"ball speed:{round(SimSparkControl.get_ball_speed(),2)}")
+            game_time_label.config(text=f"game time:{SimSparkControl.get_game_time()}")
+
+    t = threading.Thread(target=update_gui)
+    t.start()
+
+    window.mainloop()
+
+
+def start_gui():
+    t = threading.Thread(target=gui)
+    t.start()
+
+
 if __name__ == "__main__":
     get_config("config.ini")
+    start_gui()
     start_optimization()

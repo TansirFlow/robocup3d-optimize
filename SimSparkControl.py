@@ -1,3 +1,4 @@
+import configparser
 import math
 import os
 import re
@@ -6,10 +7,22 @@ import subprocess
 import threading
 import time
 
-host = '192.168.128.130'
+host = '127.0.0.1'
 port = int(os.environ.get('SPARK_SERVERPORT', 3200))
 host_username = "desktop"
 host_password = "20030713"
+
+
+def get_config(config_file_name):
+    global host, port, host_username, host_password
+    config = configparser.ConfigParser()
+    config.read(config_file_name)
+    host = config.get("optimize_server_param", "host")
+    port = config.getint("optimize_server_param", "port")
+    host_username = config.get("optimize_server_param", "username")
+    host_password = config.get("optimize_server_param", "password")
+
+
 agent_position_list = [
     [0, 0, 0], [0, 0, 0], [0, 0, 0], [0, 0, 0], [0, 0, 0], [0, 0, 0],
     [0, 0, 0], [0, 0, 0], [0, 0, 0], [0, 0, 0], [0, 0, 0]
@@ -25,12 +38,14 @@ def run_rcssserver3d():
     kill_rcssserver3d()
     command = "nohup rcssserver3d > /dev/null 2>&1 &"
     subprocess.Popen(command, shell=True)
+    time.sleep(0.5)
     global server_running
     server_running = True
 
 
 def kill_rcssserver3d():
     os.system("pkill rcsss -9")
+    os.system("pkill java -9")
     global server_running
     server_running = False
 
@@ -42,81 +57,81 @@ def prepare_msg(msg):
 
 
 def set_time(t):
-    print(f"尝试连接到{host}:{port}...")
+    # print(f"尝试连接到{host}:{port}...")
     sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
 
     try:
         sock.connect((host, port))
     except ConnectionRefusedError:
-        print(f"无法连接到{host}:{port}")
+        # print(f"无法连接到{host}:{port}")
         return False
 
-    print(f"设置时间为 {t}")
+    # print(f"设置时间为 {t}")
     msg = f"(time {t})"
     msg = prepare_msg(msg)
     sock.sendall(msg)
     response = sock.recv(1024)
-    print(response[4:])
+    # print(response[4:])
 
     sock.close()
     return True
 
 
 def play_on():
-    print(f"尝试连接到{host}:{port}...")
+    # print(f"尝试连接到{host}:{port}...")
     sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
 
     try:
         sock.connect((host, port))
     except ConnectionRefusedError:
-        print(f"无法连接到{host}:{port}")
+        # print(f"无法连接到{host}:{port}")
         return False
 
-    print("切换PlayOn模式")
+    # print("切换PlayOn模式")
     msg = prepare_msg("(playMode PlayOn)")
     sock.sendall(msg)
     response = sock.recv(1024)
-    print(response[4:])
+    # print(response[4:])
 
     sock.close()
     return True
 
 
 def kick_off():
-    print(f"尝试连接到{host}:{port}...")
+    # print(f"尝试连接到{host}:{port}...")
     sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
 
     try:
         sock.connect((host, port))
     except ConnectionRefusedError:
-        print(f"无法连接到{host}:{port}")
+        # print(f"无法连接到{host}:{port}")
         return False
 
-    print("切换KickOff_Left模式")
+    # print("切换KickOff_Left模式")
     msg = prepare_msg("(playMode KickOff_Left)")
     sock.sendall(msg)
     response = sock.recv(1024)
-    print(response[4:])
+    # print(response[4:])
 
     sock.close()
     return True
 
 
 def before_kick_off():
-    print(f"尝试连接到{host}:{port}...")
+    # print(f"尝试连接到{host}:{port}...")
     sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
 
     try:
         sock.connect((host, port))
     except ConnectionRefusedError:
-        print(f"无法连接到{host}:{port}")
+        # print(f"无法连接到{host}:{port}")
         return False
 
-    print("切换BeforeKickOff模式")
+    # print("切换BeforeKickOff模式")
     msg = prepare_msg("(playMode BeforeKickOff)")
     sock.sendall(msg)
     response = sock.recv(1024)
-    print(response[4:])
+    # print(response[4:])
 
     sock.close()
     return True
@@ -124,37 +139,37 @@ def before_kick_off():
 
 def move_player(unum, x, y, side='Left'):
     # TODO:如果球员在场左边，不需要添加side参数,否则写Right，注意首字母大写
-    print(f"尝试连接到{host}:{port}...")
+    # print(f"尝试连接到{host}:{port}...")
     sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
 
     try:
         sock.connect((host, port))
     except ConnectionRefusedError:
-        print(f"无法连接到{host}:{port}")
+        # print(f"无法连接到{host}:{port}")
         return False
 
-    print(f"移动球员{unum}到({x},{y})")
-    msg = f"(agent (unum {unum}) (team {side}) (pos {x} {y} 0.3))"
+    # print(f"移动球员{unum}到({x},{y})")
+    msg = f"(agent (unum {unum}) (team {side}) (pos {x} {y} 0.25))"
     msg = prepare_msg(msg)
     sock.sendall(msg)
     response = sock.recv(1024)
-    print(response[4:])
+    # print(response[4:])
 
     sock.close()
     return True
 
 
 def move_ball(x, y):
-    print(f"尝试连接到{host}:{port}...")
+    # print(f"尝试连接到{host}:{port}...")
     sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
 
     try:
         sock.connect((host, port))
     except ConnectionRefusedError:
-        print(f"无法连接到{host}:{port}")
+        # print(f"无法连接到{host}:{port}")
         return False
 
-    print(f"移动足球到({x},{y})")
+    # print(f"移动足球到({x},{y})")
     msg = f"(ball (pos {x} {y} 0)(vel 0 0 0))"
     msg = prepare_msg(msg)
     sock.sendall(msg)
@@ -184,7 +199,7 @@ def refresh_server_info():
 
     try:
         sock.connect((host, port))
-        print(f"成功连接到{host}:{port}")
+        # print(f"成功连接到{host}:{port}")
         while True:
             server_running = True
             msg = prepare_msg("(reqfullstate)")
@@ -202,13 +217,12 @@ def refresh_server_info():
                 z = round(float(numbers[2]), 2)
                 if math.sqrt((x - ball_pos[0]) ** 2 + (y - ball_pos[1]) ** 2 + (z - ball_pos[2]) ** 2) > 0.01:
                     # print(f"x={x},y={y},z={z}")
-                    delta_time = game_time-last_speed_update_time
+                    delta_time = game_time - last_speed_update_time
                     delta_distance = math.sqrt((x - ball_pos[0]) ** 2 + (y - ball_pos[1]) ** 2 + (z - ball_pos[2]) ** 2)
                     if delta_time > 0.001:
-                        ball_speed = delta_distance/delta_time
+                        ball_speed = delta_distance / delta_time
                     ball_pos = [x, y, z]
                     last_speed_update_time = game_time
-
 
             pattern = r"\(time ([^\)]+)\)"
             match = re.search(pattern, receive_msg)
@@ -235,10 +249,15 @@ def refresh_server_info():
                     # print(f"{unum}号球员坐标({x},{y},{z})")
             response = ''
     except ConnectionRefusedError:
-        print(f"无法连接到{host}:{port}")
+        # print(f"无法连接到{host}:{port}")
         server_running = False
     except ConnectionResetError:
-        print("server断联")
+        server_running = False
+    except BrokenPipeError:
+        kill_rcssserver3d()
+        server_running = False
+    except UnicodeDecodeError:
+        kill_rcssserver3d()
         server_running = False
     sock.close()
 
@@ -257,7 +276,7 @@ def get_agent_pos(unum):
     if unum < 1 or unum > 11:
         return None
     else:
-        return ball_pos[unum - 1]
+        return agent_position_list[unum - 1]
 
 
 def get_game_time():
@@ -277,5 +296,3 @@ def start_get_server_info():
     t = threading.Thread(target=insistence_refresh_server_info)
     t.start()
 
-
-start_get_server_info()
