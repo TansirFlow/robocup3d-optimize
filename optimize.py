@@ -4,7 +4,6 @@ import subprocess
 import time
 import cma
 import numpy as np
-import socket
 import configparser
 
 import SimSparkControl
