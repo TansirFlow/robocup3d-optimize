@@ -203,7 +203,7 @@ def fitness(params):
             dis = result["distance"]
             t = result["time"]
             dev = result["deviation"]
-            print(f"距离:{dis} 时间:{t} 偏差:{dev}")
+            print(f"距离:{round(dis,2)} 时间:{round(t,2)} 偏差:{round(dev,2)}")
             distance_list.append(dis)
             time_list.append(t)
             deviation_list.append(dev)
@@ -215,7 +215,7 @@ def fitness(params):
     if score >= accept_score:
         save_perfect_params(params, score, sum(distance_list) / len(distance_list), sum(time_list) / len(time_list),
                             sum(deviation_list) / len(deviation_list))
-    print("score", score)
+    print("平均得分：", round(score,2))
     SimSparkControl.kill_rcssserver3d()
     return -score
 
