@@ -73,7 +73,7 @@ def run_agent():
     decision_maker = run_param["decisionMaker"]
     jar_file_name = run_param["jarFileName"]
     run_agent_command = "java -jar " + jar_file_name + " --playerid=" + str(
-        player_id) + " --factory=" + factory + " --teamname=WeWantKick15m --decisionmaker=" + decision_maker
+        player_id) + " --factory=" + factory + " --teamname=DW3D_OPT --decisionmaker=" + decision_maker
     subprocess.Popen(run_agent_command, shell=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
     time.sleep(1)
 
