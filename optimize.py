@@ -4,20 +4,35 @@ import time
 import cma
 import numpy as np
 import socket
+import configparser
 
-factory = "Nao"  # 机器人型号
+factory = "Nao"  # 机器人类型
 runtimes = 30  # 每个参数跑几次
 playerid = 8  # 上几号球员
 decisionmaker = "Training"  # decisionmaker类名
 jarName = "magmaagent.jar"  # 导出的jar包名
-popsize = 50  #
+popsize = 50  # 种群规模
 cloud_server_ip = ""  # 远程服务器IP
 cloud_server_port = 5678  # 远程服务器端口
 perfect_params_score_threshold = 90  # 得分大于多少的参数认为是优秀参数
 
+config_data = {}
+
+
+def get_optimize_config(configFileName):
+    config = configparser.ConfigParser()
+    config.read(configFileName)
+    config_data["factory"] = config.get("run_param", "factory")
+    config_data["playerId"] = config.getint("run_param", "playerId")
+    config_data["decisionMaker"] = config.get("run_param", "decisionMaker")
+    config_data["jarFileName"] = config.get("run_param", "jarFileName")
+    config_data["accept_score"] = config.getfloat("run_param", "accept_score")
+    config_data["runtimes"] = config.getint("run_param", "runtimes")
+
+
 
 def save_to_localhost(params, score):  # 优秀参数存到本地
-    file_name = factory+"_perfect_params.txt"
+    file_name = factory + "_perfect_params.txt"
     file_object = open(file_name, "a")
     text = "################################################################\n"
     for i in params:
@@ -53,7 +68,7 @@ def save_perfect_params(params, score):
 
 def calculate_score(text):
     score = float(text[0])
-    print(factory," kicked", score, "meters")
+    print(factory, " kicked", score, "meters")
     return score
 
 
@@ -99,7 +114,8 @@ def fitness(params):
     global runtimes
     fitness_value = 0.0
     for i in range(runtimes):
-        fitness_value = fitness_value + (100.0*train_kick()/15.0)*0.6+(100*35.0/(params[0]+params[1]+params[2]))*0.4
+        fitness_value = fitness_value + (100.0 * train_kick() / 15.0) * 0.6 + (
+                    100 * 35.0 / (params[0] + params[1] + params[2])) * 0.4
     fitness_value = fitness_value / runtimes
     global perfect_params_score_threshold
     if fitness_value >= perfect_params_score_threshold:
@@ -108,14 +124,6 @@ def fitness(params):
     return -fitness_value  # cma-es最小化目标函数，因此将测试结果取负
 
 
-# cma_options = {
-#     "tolfun": 1e-4,  # 可选项：收敛误差容忍度，默认为1e-11
-#     "popsize": 20,  # 可选项：种群规模，默认为4+int(3 * np.log(len(x)))
-#     "bounds": [0, 1],  # 参数取值范围，默认为[-np.inf, np.inf]
-#     "verbose": True,  # 是否打印详细输出，默认为False
-# }
-
-# 获取初始参数向量
 def get_initial_parameters():
     file_object = open("initial_parameters.txt", "r")
     lines = file_object.readlines()
@@ -133,7 +141,7 @@ def optimization_controler():
     time.sleep(1)
     best = cma.fmin(fitness, initial_parameters, 0.3, options={"popsize": popsize, "verbose": True, })
     print("最佳参数向量：", best[0])
-    print("最佳适应度值：", -best[1])  # 因为我们将测试结果取负，所以这里要再取反
+    print("最佳适应度值：", -best[1])
 
 
 if __name__ == "__main__":
