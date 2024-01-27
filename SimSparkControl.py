@@ -16,15 +16,20 @@ agent_position_list = [
 ]
 ball_pos = [0, 0, 0]
 game_time = 0
+server_running = False
 
 
 def run_rcssserver3d():
     command = "nohup rcssserver3d > /dev/null 2>&1 &"
     subprocess.Popen(command, shell=True)
+    global server_running
+    server_running = True
 
 
 def kill_rcssserver3d():
     os.system("pkill rcsss -9")
+    global server_running
+    server_running = False
 
 
 def prepare_msg(msg):
@@ -166,63 +171,65 @@ def run_linux_command(command, server=host, username=host_username, password=hos
     ssh.close()
 
 
-def get_ball_pos():
+def refresh_server_info():
+    global server_running
     global ball_pos, game_time, agent_position_list
 
     sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
 
     try:
         sock.connect((host, port))
+        print(f"成功连接到{host}:{port}")
+        while True:
+            server_running = True
+            msg = prepare_msg("(reqfullstate)")
+            sock.sendall(msg)
+            response = sock.recv(9999)
+            receive_msg = response[4:]
+            receive_msg = receive_msg.decode('utf-8')
+            pattern = r"\(SLT ([\d\.\s-]+)\)\(nd StaticMesh \(setVisible 1\) \(load models/soccerball.obj\)"
+            result = re.search(pattern, receive_msg)
+            if result:
+                numbers = result.group(1).split()
+                numbers = numbers[12:-1]
+                x = round(float(numbers[0]), 2)
+                y = round(float(numbers[1]), 2)
+                z = round(float(numbers[2]), 2)
+                if math.sqrt((x - ball_pos[0]) ** 2 + (y - ball_pos[1]) ** 2 + (z - ball_pos[2]) ** 2) > 0.01:
+                    # print(f"x={x},y={y},z={z}")
+                    ball_pos = [x, y, z]
+
+            pattern = r"\(time ([^\)]+)\)"
+            match = re.search(pattern, receive_msg)
+            if match:
+                time = round(float(match.group(1)), 2)
+                if game_time != time:
+                    # print(f"time={time}")
+                    game_time = time
+
+            pattern = r"\(nd TRF \(SLT ([\d\.\s-]+)\)\(nd StaticMesh \(setVisible 1\) \(load models/rthigh.obj\) \(sSc 0.07 0.07 0.07\)\(resetMaterials matNum(\d+) matLeft naowhite\)\)\)"
+            matches = re.findall(pattern, receive_msg)
+
+            if matches:
+                for match in matches:
+                    all_numbers = []
+                    numbers = match[0].strip().split(' ')
+                    all_numbers.extend(numbers)
+                    pos = all_numbers[12:-1]
+                    x = round(float(pos[0]), 2)
+                    y = round(float(pos[1]), 2)
+                    z = round(float(pos[2]), 2)
+                    unum = int(match[1])
+                    agent_position_list[unum - 1] = [x, y, z]
+                    # print(f"{unum}号球员坐标({x},{y},{z})")
+            response = ''
     except ConnectionRefusedError:
         print(f"无法连接到{host}:{port}")
-        return False
-
-    while True:
-        msg = prepare_msg("(reqfullstate)")
-        sock.sendall(msg)
-        response = sock.recv(9999)
-        receive_msg = response[4:]
-        receive_msg = receive_msg.decode('utf-8')
-        pattern = r"\(SLT ([\d\.\s-]+)\)\(nd StaticMesh \(setVisible 1\) \(load models/soccerball.obj\)"
-        result = re.search(pattern, receive_msg)
-        if result:
-            numbers = result.group(1).split()
-            numbers = numbers[12:-1]
-            x = round(float(numbers[0]), 2)
-            y = round(float(numbers[1]), 2)
-            z = round(float(numbers[2]), 2)
-            if math.sqrt((x - ball_pos[0]) ** 2 + (y - ball_pos[1]) ** 2 + (z - ball_pos[2]) ** 2) > 0.01:
-                # print(f"x={x},y={y},z={z}")
-                ball_pos = [x, y, z]
-
-        pattern = r"\(time ([^\)]+)\)"
-        match = re.search(pattern, receive_msg)
-        if match:
-            time = round(float(match.group(1)), 2)
-            if game_time != time:
-                # print(f"time={time}")
-                game_time = time
-
-        pattern = r"\(nd TRF \(SLT ([\d\.\s-]+)\)\(nd StaticMesh \(setVisible 1\) \(load models/rthigh.obj\) \(sSc 0.07 0.07 0.07\)\(resetMaterials matNum(\d+) matLeft naowhite\)\)\)"
-        matches = re.findall(pattern, receive_msg)
-
-        if matches:
-            for match in matches:
-                all_numbers = []
-                numbers = match[0].strip().split(' ')
-                all_numbers.extend(numbers)
-                pos = all_numbers[12:-1]
-                x = round(float(pos[0]), 2)
-                y = round(float(pos[1]), 2)
-                z = round(float(pos[2]), 2)
-                unum = int(match[1])
-                agent_position_list[unum - 1] = [x, y, z]
-                # print(f"{unum}号球员坐标({x},{y},{z})")
-
-        response = ''
-
+        server_running = False
+    except ConnectionResetError:
+        print("server断联")
+        server_running = False
     sock.close()
-    return True
 
 
 def get_ball_pos():
@@ -243,6 +250,11 @@ def get_game_time():
 
 
 def start_get_server_info():
-    t = threading.Thread(target=get_ball_pos)
+    def insistence_refresh_server_info():
+        while True:
+            refresh_server_info()
+    t = threading.Thread(target=insistence_refresh_server_info)
     t.start()
 
+
+start_get_server_info()

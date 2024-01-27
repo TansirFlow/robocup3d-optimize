@@ -6,6 +6,8 @@ import numpy as np
 import socket
 import configparser
 
+import SimSparkControl
+
 factory = "Nao"  # 机器人类型
 runtimes = 30  # 每个参数跑几次
 playerid = 8  # 上几号球员
@@ -21,10 +23,8 @@ run_param = {}
 optimize_server_param = {}
 backup_server_param = {}
 
-init_parameter = []
 
-
-def get_optimize_config(config_file_name):
+def get_config(config_file_name):
     config = configparser.ConfigParser()
     config.read(config_file_name)
 
@@ -37,6 +37,7 @@ def get_optimize_config(config_file_name):
     run_param["jarFileName"] = config.get("run_param", "jarFileName")
     run_param["acceptScore"] = config.getfloat("run_param", "acceptScore")
     run_param["runtimesPerParameter"] = config.getint("run_param", "runtimesPerParameter")
+    run_param["tempParameterFileName"] = config.getint("run_param", "tempParameterFileName")
 
     optimize_server_param["host"] = config.get("optimize_server_param", "host")
     optimize_server_param["port"] = config.getint("optimize_server_param", "port")
@@ -82,19 +83,12 @@ def save_perfect_params(params, score):
     send_to_cloud_server(params, score)
 
 
-def calculate_score(text):
-    score = float(text[0])
-    print(factory, " kicked", score, "meters")
-    return score
-
-
 def train_kick():
-    command1 = "rcssserver3d"
-    subprocess.Popen(command1, shell=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+    SimSparkControl.run_rcssserver3d()
     time.sleep(1)
-    start_command = "java -jar " + jarName + " --playerid=" + str(
+    start_agent_command = "java -jar " + jarName + " --playerid=" + str(
         playerid) + " --factory=" + factory + " --teamname=WeWantKick15m --decisionmaker=" + decisionmaker
-    subprocess.Popen(start_command, shell=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+    subprocess.Popen(start_agent_command, shell=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
     start_time = time.time()
     while 1:
         time.sleep(0.1)
@@ -111,11 +105,12 @@ def train_kick():
             return calculate_score(text)
 
 
-def write_parms2file(params):
-    if os.path.exists("config.txt"):
-        os.remove("config.txt")
+def write_temp_parameter_file(params):
+    temp_parameter_file_name = run_param["tempParameterFileName"]
+    if os.path.exists(temp_parameter_file_name):
+        os.remove(temp_parameter_file_name)
     time.sleep(0.5)
-    file_object = open("config.txt", "w+")
+    file_object = open(temp_parameter_file_name, "w+")
     text = ""
     for i in params:
         text = text + str(i) + "\n"
@@ -123,25 +118,35 @@ def write_parms2file(params):
     file_object.close()
 
 
+def estimate_score(distance_list, time_list, deviation_list):
+    score = 80
+    return score
+
+
 def fitness(params):
-    # x为待优化参数向量，需要传入到控制器中进行测试，返回测试结果用于评估适应度
-    # 这里的测试内容可以根据具体情况进行修改和扩展
-    write_parms2file(params)
-    global runtimes
-    fitness_value = 0.0
-    for i in range(runtimes):
-        fitness_value = fitness_value + (100.0 * train_kick() / 15.0) * 0.6 + (
-                100 * 35.0 / (params[0] + params[1] + params[2])) * 0.4
-    fitness_value = fitness_value / runtimes
-    global perfect_params_score_threshold
-    if fitness_value >= perfect_params_score_threshold:
-        save_perfect_params(params, fitness_value)
-    print("average score", fitness_value)
-    return -fitness_value  # cma-es最小化目标函数，因此将测试结果取负
+    runtimes_per_parameter = run_param["runtimesPerParameter"]
+    accept_score = run_param["acceptScore"]
+    write_temp_parameter_file(params)
+
+    SimSparkControl.run_rcssserver3d()
+    distance_list = []
+    time_list = []
+    deviation_list = []
+    for i in range(runtimes_per_parameter):
+        success, dis, t, dev = train_kick()
+        if success:
+            distance_list.append(dis)
+            time_list.append(t)
+            deviation_list.append(dev)
+    score = estimate_score(distance_list, time_list, deviation_list)
+    if score >= accept_score:
+        save_perfect_params(params, score)
+    print("score", score)
+    return -score
 
 
 def get_initial_parameters():
-    file_object = open("initial_parameters.txt", "r")
+    file_object = open(cma_param["initParameterFileName"])
     lines = file_object.readlines()
     params = []
     for line in lines:
@@ -150,15 +155,15 @@ def get_initial_parameters():
     return initial_parameters
 
 
-def optimization_controler():
+def start_optimization():
+    SimSparkControl.kill_rcssserver3d()
     initial_parameters = get_initial_parameters()
-    global factory, runtimes, playerid, decisionmaker, jarName, popsize
-    os.system("pkill rcsss -9")
-    time.sleep(1)
-    best = cma.fmin(fitness, initial_parameters, 0.3, options={"verbose": True, })
-    print("最佳参数向量：", best[0])
-    print("最佳适应度值：", -best[1])
+    sigma0 = cma_param["sigma0"]
+    best_parameter, best_score = cma.fmin2(fitness, initial_parameters, sigma0, options={"verbose": True, })
+    print("最佳参数向量：", best_parameter)
+    print("最佳适应度值：", -best_score)
 
 
 if __name__ == "__main__":
-    optimization_controler()
+    get_config("config.ini")
+    start_optimization()
